@@ -4,13 +4,18 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"runtime"
+
+	"github.com/sirupsen/logrus"
 )
 
 // 全局变量，用于存储命令行参数
@@ -18,9 +23,48 @@ var (
 	frontendAPIPrefix string
 	backendURL        string
 	port              string
+	logger            *logrus.Logger
 )
 
 func init() {
+	// 初始化logrus
+	logger = logrus.New()
+
+	// 创建日志目录
+	logDir := "/tmp/go_proxy"
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		logger.Fatal("Failed to create log directory:", err)
+	}
+
+	// 设置日志文件路径（按日期）
+	today := time.Now().Format("2006-01-02")
+	logFile := filepath.Join(logDir, fmt.Sprintf("go_proxy_%s.log", today))
+
+	// 打开日志文件
+	file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		logger.Fatal("Failed to open log file:", err)
+	}
+
+	// 设置日志输出到文件
+	logger.SetOutput(file)
+
+	// 设置日志格式，包含时间、文件行数等信息
+	logger.SetFormatter(&logrus.TextFormatter{
+		FullTimestamp:   true,
+		TimestampFormat: "2006-01-02 15:04:05",
+		CallerPrettyfier: func(f *runtime.Frame) (string, string) {
+			filename := filepath.Base(f.File)
+			return "", fmt.Sprintf("%s:%d", filename, f.Line)
+		},
+	})
+
+	// 启用调用者信息
+	logger.SetReportCaller(true)
+
+	// 设置日志级别
+	logger.SetLevel(logrus.InfoLevel)
+
 	// 定义命令行参数
 	flag.StringVar(&frontendAPIPrefix, "prefix", "/api/", "前端API路径前缀 (默认: /api/)")
 	flag.StringVar(&backendURL, "backend", "https://chat-stage.sensetime.com/api/test-cancel/v0.0.1/", "后端服务器地址")
@@ -31,13 +75,13 @@ func init() {
 
 	// 验证参数
 	if frontendAPIPrefix == "" {
-		log.Fatal("前端API前缀不能为空")
+		logger.Fatal("前端API前缀不能为空")
 	}
 	if backendURL == "" {
-		log.Fatal("后端URL不能为空")
+		logger.Fatal("后端URL不能为空")
 	}
 	if port == "" {
-		log.Fatal("端口不能为空")
+		logger.Fatal("端口不能为空")
 	}
 
 	// 确保前端API前缀以斜杠开头和结尾
@@ -56,17 +100,17 @@ func init() {
 
 func main() {
 	// 打印启动信息
-	fmt.Printf("API Proxy Configuration:\n")
-	fmt.Printf("  Frontend API Prefix: %s\n", frontendAPIPrefix)
-	fmt.Printf("  Backend URL: %s\n", backendURL)
-	fmt.Printf("  Port: %s\n", port)
-	fmt.Printf("  Path mapping: %s* -> %s*\n", frontendAPIPrefix, backendURL)
-	fmt.Println()
+	logger.Info("API Proxy Configuration:")
+	logger.Infof("  Frontend API Prefix: %s", frontendAPIPrefix)
+	logger.Infof("  Backend URL: %s", backendURL)
+	logger.Infof("  Port: %s", port)
+	logger.Infof("  Path mapping: %s* -> %s*", frontendAPIPrefix, backendURL)
+	logger.Info("")
 
 	// 解析后端URL
 	backend, err := url.Parse(backendURL)
 	if err != nil {
-		log.Fatal("Failed to parse backend URL:", err)
+		logger.Fatal("Failed to parse backend URL:", err)
 	}
 
 	// 创建反向代理
@@ -107,8 +151,8 @@ func main() {
 		req.Header.Set("Connection", "close")
 
 		after := req.URL.String()
-		log.Printf("Proxying request: %s %s -> %s", req.Method, before, after)
-		log.Printf("Path mapping: %s -> %s", originalPath, req.URL.Path)
+		logger.Infof("Proxying request: %s %s -> %s", req.Method, before, after)
+		logger.Infof("Path mapping: %s -> %s", originalPath, req.URL.Path)
 	}
 
 	// 自定义Transport，处理TLS配置
@@ -133,14 +177,14 @@ func main() {
 
 	// 自定义ModifyResponse函数，处理响应头和cookie
 	proxy.ModifyResponse = func(resp *http.Response) error {
-		log.Printf("Response received: %s", resp.Status)
+		logger.Infof("Response received: %s", resp.Status)
 
 		// 处理Set-Cookie头，确保cookie能正确传递到前端
 		cookies := resp.Header.Values("Set-Cookie")
 		if len(cookies) > 0 {
-			log.Printf("Found %d Set-Cookie headers", len(cookies))
+			logger.Infof("Found %d Set-Cookie headers", len(cookies))
 			for i, cookie := range cookies {
-				log.Printf("Set-Cookie[%d]: %s", i, cookie)
+				logger.Infof("Set-Cookie[%d]: %s", i, cookie)
 			}
 		}
 
@@ -149,7 +193,7 @@ func main() {
 		for _, header := range importantHeaders {
 			if values := resp.Header.Values(header); len(values) > 0 {
 				for _, value := range values {
-					log.Printf("Response Header %s: %s", header, value)
+					logger.Infof("Response Header %s: %s", header, value)
 				}
 			}
 		}
@@ -159,7 +203,7 @@ func main() {
 
 	// 自定义错误处理
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		log.Printf("Proxy error for %s %s: %v", r.Method, r.URL.Path, err)
+		logger.Errorf("Proxy error for %s %s: %v", r.Method, r.URL.Path, err)
 
 		// 根据错误类型返回不同的状态码
 		if strings.Contains(err.Error(), "timeout") {
@@ -176,21 +220,21 @@ func main() {
 		Addr: port,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// 记录请求信息
-			log.Printf("Received request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+			logger.Infof("Received request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 
 			// 记录请求头信息（用于调试）
-			log.Printf("Request Headers:")
+			logger.Info("Request Headers:")
 			for name, values := range r.Header {
 				for _, value := range values {
-					log.Printf("  %s: %s", name, value)
+					logger.Infof("  %s: %s", name, value)
 				}
 			}
 
 			// 记录Cookie信息
 			if cookies := r.Cookies(); len(cookies) > 0 {
-				log.Printf("Request Cookies:")
+				logger.Info("Request Cookies:")
 				for _, cookie := range cookies {
-					log.Printf("  %s: %s", cookie.Name, cookie.Value)
+					logger.Infof("  %s: %s", cookie.Name, cookie.Value)
 				}
 			}
 
@@ -199,14 +243,14 @@ func main() {
 		}),
 	}
 
-	fmt.Printf("API Proxy server starting on port %s\n", port)
-	fmt.Printf("Frontend API prefix: %s\n", frontendAPIPrefix)
-	fmt.Printf("Backend URL: %s\n", backendURL)
-	fmt.Printf("Path mapping: %s* -> %s*\n", frontendAPIPrefix, backendURL)
-	fmt.Println("Press Ctrl+C to stop the server")
+	logger.Infof("API Proxy server starting on port %s", port)
+	logger.Infof("Frontend API prefix: %s", frontendAPIPrefix)
+	logger.Infof("Backend URL: %s", backendURL)
+	logger.Infof("Path mapping: %s* -> %s*", frontendAPIPrefix, backendURL)
+	logger.Info("Press Ctrl+C to stop the server")
 
 	// 启动服务器
 	if err := server.ListenAndServe(); err != nil {
-		log.Fatal("Server failed to start:", err)
+		logger.Fatal("Server failed to start:", err)
 	}
 }
