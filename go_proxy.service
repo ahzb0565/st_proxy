@@ -8,8 +8,8 @@ Wants=network.target
 Type=simple
 # User=go_proxy
 # Group=go_proxy
-WorkingDirectory=/opt/go_proxy
-ExecStart=/opt/go_proxy/go_proxy -prefix="/api/" -backend="https://chat-stage.sensetime.com/api/test-cancel/v0.0.1/" -port=":8080"
+WorkingDirectory=/opt/st_proxy
+ExecStart=/opt/st_proxy/go_proxy -prefix="/api/" -backend="https://chat-stage.sensetime.com/api/test-cancel/v0.0.1/" -port=":8080"
 # ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=5
