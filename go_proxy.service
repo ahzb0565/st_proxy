@@ -1,0 +1,35 @@
+[Unit]
+Description=Go API Proxy Service
+# Documentation=https://github.com/your-repo/go_proxy
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+# User=go_proxy
+# Group=go_proxy
+WorkingDirectory=/opt/go_proxy
+ExecStart=/opt/go_proxy/proxy -prefix="/api/" -backend="https://chat-stage.sensetime.com/api/test-cancel/v0.0.1/" -port=":8080"
+# ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+# SyslogIdentifier=go_proxy
+
+# 安全设置
+# NoNewPrivileges=true
+# PrivateTmp=true
+# ProtectSystem=strict
+# ProtectHome=true
+# ReadWritePaths=/opt/go_proxy/logs
+
+# 资源限制
+# LimitNOFILE=65536
+# LimitNPROC=4096
+
+# 环境变量
+# Environment=GOMAXPROCS=4
+
+[Install]
+WantedBy=multi-user.target 
